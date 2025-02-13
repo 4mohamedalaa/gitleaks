@@ -1,0 +1,37 @@
+# .gitleaks.toml
+title = "Gitleaks Config"
+
+[allowlist]
+paths = [
+    '''node_modules''',
+    '''vendor''',
+    '''.gitleaks.toml'''
+]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(api[_-]?key|apikey|secret)[_-]?([0-9a-zA-Z]{32,45})'''
+secretGroup = 2
+keywords = [
+    "api[_-]?key",
+    "apikey",
+    "secret"
+]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key ID"
+regex = '''(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'''
+keywords = [
+    "AKIA",
+    "AWS"
+]
+
+[[rules]]
+id = "github-pat"
+description = "GitHub Personal Access Token"
+regex = '''ghp_[0-9a-zA-Z]{36}'''
+keywords = [
+    "ghp_"
+]
