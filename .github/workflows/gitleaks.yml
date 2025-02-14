@@ -1,16 +1,10 @@
 name: Gitleaks Scanner
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+on: [push, pull_request]
 
 permissions:
-  contents: read
-  security-events: write
-  issues: write
+    contents: read
+    security-events: write
+    issues: write
 
 jobs:
   security-scan:
@@ -20,45 +14,84 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetches the entire commit history
+          fetch-depth: 0  # Important for full history
 
-      - name: Run Gitleaks
+      - name: Install Gitleaks
+        run: |
+          wget https://github.com/zricethezav/gitleaks/releases/download/v8.16.1/gitleaks_8.16.1_linux_x64.tar.gz
+          tar -xzf gitleaks_8.16.1_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+      
+      - name: Run Full Repository Scan
         id: gitleaks
         run: |
-          # Install Gitleaks
-          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh
+          # Scan the entire repository
+          gitleaks detect \
+            --source . \
+            --verbose \
+            --report-format json \
+            --report-path leaks.json \
+            --no-git || echo "LEAKS_FOUND=true" >> $GITHUB_ENV
 
-          # Run Gitleaks to scan the entire repository
-          ./bin/gitleaks detect --source=. --config=.gitleaks.toml --report-format=sarif --report-path=results.sarif --verbose --exit-code=2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GIT_ACTION_TOKEN }}
+      - name: Check for Leaks
+        run: |
+          if [ -f leaks.json ]; then
+            echo "Secrets detected in the repository!"
+            cat leaks.json
+            exit 1
+          fi
 
       - name: Create Issue on Failure
-        if: failure() && steps.gitleaks.outcome == 'failure'
+        if: failure()
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GIT_ACTION_TOKEN }}
           script: |
+            const fs = require('fs');
+            let leaksDetail = '';
+            
+            if (fs.existsSync('leaks.json')) {
+              const leaks = JSON.parse(fs.readFileSync('leaks.json', 'utf8'));
+              leaksDetail = JSON.stringify(leaks, null, 2);
+            }
+
             const issueBody = `## 🚨 Security Issue: Potential secrets detected
             
-            Gitleaks has detected potential secrets in the codebase.
+            Gitleaks has detected secrets in the codebase.
             
             **Details:**
             - Commit: ${context.sha}
             - Branch: ${context.ref}
             - Workflow run: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
             
-            ### Next Steps:
-            1. Review the scan results in the Actions tab
-            2. Remove any detected secrets
-            3. Rotate any exposed credentials
-            4. Update any affected systems
+            ### Detected Secrets:
+            \`\`\`json
+            ${leaksDetail}
+            \`\`\`
             
-            ⛔ **IMPORTANT**: The pipeline will continue to fail until all detected secrets are removed.
+            ### Required Actions:
+            1. Remove ALL detected secrets from the codebase
+            2. Rotate any exposed credentials
+            3. Update affected systems
             
-            Please handle this with urgency to maintain security.`;
+            ⛔ **PIPELINE BLOCKED**: This pipeline will continue to fail until all secrets are removed.
+            
+            Please handle this with urgency.`;
             
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '🚨 Security Issue
+              title: '🚨 Security Issue: Secrets Found in Repository',
+              body: issueBody,
+              labels: ['security', 'gitleaks', 'pipeline-blocker']
+            });
+
+      - name: Save Scan Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-scan-results
+          path: |
+            leaks.json
+            results.sarif
+          retention-days: 30
