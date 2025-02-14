@@ -28,6 +28,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_ACTION_TOKEN }}
           GITLEAKS_ENABLE_EXIT_CODE: true  # Ensures non-zero exit code on findings
+        with:
+          # Scan the entire repository (current state of files)
+          config-path: .gitleaks.toml  # Path to your Gitleaks config file
+          scan-mode: local              # Scans the current state of the repository
+          verbose: true                 # Enables verbose output for debugging
 
       - name: Create Issue on Failure
         if: failure() && steps.gitleaks.outcome == 'failure'
@@ -35,7 +40,7 @@ jobs:
         with:
           github-token: ${{ secrets.GIT_ACTION_TOKEN }}
           script: |
-            const issueBody = `## � Security Issue: Potential secrets detected
+            const issueBody = `## 🚨 Security Issue: Potential secrets detected
             
             Gitleaks has detected potential secrets in the codebase.
             
