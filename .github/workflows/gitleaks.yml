@@ -24,15 +24,14 @@ jobs:
 
       - name: Run Gitleaks
         id: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        run: |
+          # Install Gitleaks
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh
+
+          # Run Gitleaks to scan the entire repository
+          ./bin/gitleaks detect --source=. --config=.gitleaks.toml --report-format=sarif --report-path=results.sarif --verbose --exit-code=2
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_ACTION_TOKEN }}
-          GITLEAKS_ENABLE_EXIT_CODE: true  # Ensures non-zero exit code on findings
-        with:
-          # Scan the entire repository (current state of files)
-          config-path: .gitleaks.toml  # Path to your Gitleaks config file
-          scan-mode: local              # Scans the current state of the repository
-          verbose: true                 # Enables verbose output for debugging
 
       - name: Create Issue on Failure
         if: failure() && steps.gitleaks.outcome == 'failure'
@@ -62,22 +61,4 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '🚨 Security Issue: Potential secrets detected',
-              body: issueBody,
-              labels: ['security', 'gitleaks', 'pipeline-blocker']
-            });
-
-      - name: Save Scan Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-scan-results
-          path: results.sarif
-          retention-days: 30
-
-      - name: Fail if secrets found
-        if: steps.gitleaks.outcome == 'failure'
-        run: |
-          echo "🚨 Secrets detected in the codebase!"
-          echo "Please remove all secrets and try again."
-          exit 1
+              title: '🚨 Security Issue
