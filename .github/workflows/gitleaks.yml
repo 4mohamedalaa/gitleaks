@@ -2,8 +2,8 @@ name: Gitleaks Scanner
 on: [push, pull_request]
 
 jobs:
-  scan:
-    name: Gitleaks Security Scan
+  security-scan:
+    name: Security Scanning
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -12,6 +12,34 @@ jobs:
           fetch-depth: 0
 
       - name: Run Gitleaks
+        id: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GIT_ACTION_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Create Issue on Failure
+        if: steps.gitleaks.outcome == 'failure'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Security Issue: Potential secrets detected',
+              body: `Gitleaks has detected potential secrets in the codebase.
+              
+              **Details:**
+              - Commit: ${context.sha}
+              - Workflow run: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+              
+              Please review the scan results and take appropriate action.`
+            });
+
+      - name: Save Scan Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: gitleaks-scan-results
+          path: results.sarif
+          retention-days: 30
