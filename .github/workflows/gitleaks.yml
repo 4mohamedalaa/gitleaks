@@ -1,11 +1,16 @@
 name: Gitleaks Scanner
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
-# Add permissions block at workflow level
 permissions:
-    contents: read
-    security-events: write
-    issues: write    # Permission to create issues
+  contents: read
+  security-events: write
+  issues: write
 
 jobs:
   security-scan:
@@ -15,15 +20,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      
+          fetch-depth: 0  # Fetches the entire commit history
+
       - name: Run Gitleaks
         id: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_ACTION_TOKEN }}
           GITLEAKS_ENABLE_EXIT_CODE: true  # Ensures non-zero exit code on findings
-        # Remove continue-on-error to make the workflow fail
 
       - name: Create Issue on Failure
         if: failure() && steps.gitleaks.outcome == 'failure'
@@ -31,7 +35,7 @@ jobs:
         with:
           github-token: ${{ secrets.GIT_ACTION_TOKEN }}
           script: |
-            const issueBody = `## 🚨 Security Issue: Potential secrets detected
+            const issueBody = `## � Security Issue: Potential secrets detected
             
             Gitleaks has detected potential secrets in the codebase.
             
