@@ -38,7 +38,7 @@ jobs:
 
       - name: Save Scan Results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: gitleaks-scan-results
           path: results.sarif
