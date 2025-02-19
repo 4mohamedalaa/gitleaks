@@ -23,14 +23,10 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          config-path: .github/gitleaks.toml  # Optional: custom config path
-          report-format: json
-          report-path: gitleaks-report.json
 
-      - name: Upload GitLeaks Report
-        if: always()  # Run even if previous step fails
+      - name: Upload SARIF report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gitleaks-report
-          path: gitleaks-report.json
+          name: gitleaks-results
+          path: results.sarif
