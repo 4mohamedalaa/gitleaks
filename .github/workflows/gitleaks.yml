@@ -23,6 +23,10 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: true
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_SCAN_FULL_HISTORY: true
+          GITLEAKS_SCAN_STAGED_FILES: true
 
       - name: Upload SARIF report
         if: always()
