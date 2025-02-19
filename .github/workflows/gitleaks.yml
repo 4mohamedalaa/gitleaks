@@ -1,16 +1,36 @@
-name: gitleaks
+name: GitLeaks Secret Scanner
+
 on:
-  pull_request:
   push:
-  workflow_dispatch:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight
+  workflow_dispatch:      # Allow manual triggers
+
 jobs:
   scan:
-    name: gitleaks
+    name: GitLeaks Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+          fetch-depth: 0  # Required for all commits history
+
+      - name: GitLeaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-path: .github/gitleaks.toml  # Optional: custom config path
+          report-format: json
+          report-path: gitleaks-report.json
+
+      - name: Upload GitLeaks Report
+        if: always()  # Run even if previous step fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
