@@ -29,17 +29,17 @@ jobs:
         id: gitleaks
         run: |
           # Run gitleaks and capture the output
-          gitleaks detect --no-git --source . -c .gitleaks.toml -f json > leaks.json || true
+          gitleaks detect --no-git --source . -c .gitleaks.toml -f json | tee leaks.json || true
           gitleaks detect --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
           
-          # Check if leaks.json has content and is valid JSON
-          if [ -s leaks.json ] && jq empty leaks.json 2>/dev/null; then
+          # Check if there are any findings in the output
+          if grep -q "Description" leaks.json; then
             echo "LEAKS_FOUND=true" >> $GITHUB_ENV
             echo "Secrets detected in the repository!"
             cat leaks.json
             exit 1
           else
-            echo "No leaks found or invalid JSON output"
+            echo "No leaks found"
             echo "LEAKS_FOUND=false" >> $GITHUB_ENV
             # Ensure we have a valid JSON array even if empty
             echo "[]" > leaks.json
@@ -57,8 +57,10 @@ jobs:
             try {
               if (fs.existsSync('leaks.json')) {
                 const fileContent = fs.readFileSync('leaks.json', 'utf8');
-                const leaks = JSON.parse(fileContent);
-                leaksDetail = JSON.stringify(leaks, null, 2);
+                if (fileContent.trim()) {
+                  const leaks = JSON.parse(fileContent);
+                  leaksDetail = JSON.stringify(leaks, null, 2);
+                }
               }
             } catch (error) {
               console.log('Error reading or parsing leaks.json:', error);
