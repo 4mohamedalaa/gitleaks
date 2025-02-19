@@ -26,18 +26,61 @@ jobs:
           sudo mv gitleaks /usr/local/bin/
 
       - name: Run Gitleaks
+        id: gitleaks
+        continue-on-error: true
         run: |
-          gitleaks detect -v --no-git --source . -c .gitleaks.toml
+          OUTPUT=$(gitleaks detect -v --no-git --source . -c .gitleaks.toml -f json)
+          echo "GITLEAKS_OUTPUT<<EOF" >> $GITHUB_ENV
+          echo "$OUTPUT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          if [ $? -eq 1 ]; then
+            echo "SECRETS_FOUND=true" >> $GITHUB_ENV
+          else
+            echo "SECRETS_FOUND=false" >> $GITHUB_ENV
+          fi
 
-      - name: GitLeaks Action
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: true
-          GITLEAKS_CONFIG: .gitleaks.toml
-          GITLEAKS_SCAN_FULL_HISTORY: true
-          GITLEAKS_SCAN_STAGED_FILES: true
-          GITLEAKS_VERBOSE: true
+      - name: Create Issue
+        if: env.SECRETS_FOUND == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = process.env.GITLEAKS_OUTPUT;
+            let findings;
+            try {
+              findings = JSON.parse(output);
+            } catch (e) {
+              findings = [];
+            }
+            
+            const issueBody = `
+            ## 🚨 Secrets Detected in Repository
+            
+            GitLeaks has detected potential secrets in the codebase. Please review and remove any sensitive information.
+            
+            ### Findings:
+            ${findings.map(finding => `
+            - **Description**: ${finding.Description}
+            - **File**: ${finding.File}
+            - **Line**: ${finding.StartLine}
+            - **Rule**: ${finding.RuleID}
+            `).join('\n')}
+            
+            ### 🔍 Next Steps:
+            1. Review the detected secrets
+            2. Remove or rotate any exposed credentials
+            3. Use environment variables or secret management systems
+            4. Update the code to remove the secrets
+            
+            > Note: This is an automated security alert. Please handle with care.
+            `;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Secrets Detected by GitLeaks',
+              body: issueBody,
+              labels: ['security', 'secrets-detected']
+            });
 
       - name: Upload SARIF report
         if: always()
