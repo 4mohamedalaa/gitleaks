@@ -27,14 +27,15 @@ jobs:
 
       - name: Run Gitleaks
         run: |
-          gitleaks detect -v --no-git --source . -c .gitleaks.toml -f json > leaks.json || true
+          # Capture the output in text format
+          gitleaks detect -v --no-git --source . -c .gitleaks.toml > scan_output.txt || true
           gitleaks detect -v --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
 
       - name: Check for Leaks
         run: |
-          if [ -f leaks.json ]; then
+          if grep -q "Finding:" scan_output.txt; then
             echo "Secrets detected in the repository!"
-            cat leaks.json
+            cat scan_output.txt
             exit 1
           fi
 
@@ -45,11 +46,10 @@ jobs:
           github-token: ${{ secrets.GIT_ACTION_TOKEN }}
           script: |
             const fs = require('fs');
-            let leaksDetail = '';
+            let findings = '';
             
-            if (fs.existsSync('leaks.json')) {
-              const leaks = JSON.parse(fs.readFileSync('leaks.json', 'utf8'));
-              leaksDetail = JSON.stringify(leaks, null, 2);
+            if (fs.existsSync('scan_output.txt')) {
+              findings = fs.readFileSync('scan_output.txt', 'utf8');
             }
 
             const issueBody = `## 🚨 Security Issue: Potential secrets detected
@@ -62,8 +62,8 @@ jobs:
             - Workflow run: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
             
             ### Detected Secrets:
-            \`\`\`json
-            ${leaksDetail}
+            \`\`\`
+            ${findings}
             \`\`\`
             
             ### Required Actions:
@@ -89,6 +89,6 @@ jobs:
         with:
           name: gitleaks-scan-results
           path: |
-            leaks.json
+            scan_output.txt
             results.sarif
           retention-days: 30
