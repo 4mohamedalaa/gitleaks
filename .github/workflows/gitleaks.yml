@@ -17,9 +17,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Required for all commits history
+          fetch-depth: 0
 
-      - name: GitLeaks Secret Scanner
+      - name: Install Gitleaks
+        run: |
+          wget https://github.com/zricethezav/gitleaks/releases/download/v8.16.1/gitleaks_8.16.1_linux_x64.tar.gz
+          tar -xzf gitleaks_8.16.1_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Run Gitleaks
+        run: |
+          gitleaks detect -v --no-git --source . -c .gitleaks.toml
+
+      - name: GitLeaks Action
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -27,6 +37,7 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks.toml
           GITLEAKS_SCAN_FULL_HISTORY: true
           GITLEAKS_SCAN_STAGED_FILES: true
+          GITLEAKS_VERBOSE: true
 
       - name: Upload SARIF report
         if: always()

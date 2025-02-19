@@ -10,31 +10,36 @@ paths = [
 ]
 
 [[rules]]
-id = "aws-access-key-id"
-description = "AWS Access Key ID"
-regex = '''(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'''
+id = "aws-credentials"
+description = "AWS Credentials"
+regex = '''(?i)(aws_access_key|aws_secret_key)\s*=\s*["'][^"']+["']'''
 
 [[rules]]
-id = "aws-secret-access-key"
-description = "AWS Secret Access Key"
-regex = '''(?i)aws(.{0,20})?(?-i)['\"][0-9a-zA-Z\/+]{40}['\"]'''
+id = "postgres-url"
+description = "Postgres Connection URL"
+regex = '''(?i)(postgres(?:ql)?:\/\/[^:\s]+:[^@\s]+@[^\s]+)'''
 
 [[rules]]
-id = "password-in-url"
-description = "Password in URL"
-regex = '''[a-zA-Z]{3,10}://[^/\s:@]*?:[^/\s@]*?@[^/\s]*'''
+id = "mongodb-url"
+description = "MongoDB Connection URL"
+regex = '''(?i)(mongodb:\/\/[^:\s]+:[^@\s]+@[^\s]+)'''
 
 [[rules]]
-id = "generic-credentials"
-description = "Generic Credentials"
-regex = '''(?i)(dbpassword|dbuser|dbname|dbhost|api_key|apikey|secret|password|guid|credentials)(.{0,20})?['\"][0-9a-zA-Z-_!{}/=]{4,120}['\"]'''
+id = "github-token"
+description = "GitHub Token"
+regex = '''(?i)ghp_[0-9a-zA-Z]{36}'''
+
+[[rules]]
+id = "google-api"
+description = "Google API Key"
+regex = '''(?i)AIza[0-9A-Za-z\\-_]{35}'''
 
 [[rules]]
 id = "jwt"
-description = "JSON Web Token"
-regex = '''(?i)eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*$'''
+description = "JWT Token"
+regex = '''(?i)eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*'''
 
 [[rules]]
 id = "private-key"
 description = "Private Key"
-regex = '''-----BEGIN (?:RSA|OPENSSH|DSA|EC|PGP) PRIVATE KEY( BLOCK)?-----''' 
+regex = '''(?s)-----BEGIN.*?PRIVATE KEY-----.*?-----END.*?PRIVATE KEY-----''' 
