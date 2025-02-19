@@ -26,47 +26,30 @@ jobs:
           sudo mv gitleaks /usr/local/bin/
 
       - name: Run Gitleaks
-        id: gitleaks
-        continue-on-error: true
         run: |
-          # Run gitleaks and capture both output and exit code
-          OUTPUT=$(gitleaks detect --no-git --source . -c .gitleaks.toml -f json)
-          EXIT_CODE=$?
-          
-          # Save the output to a file
-          echo "$OUTPUT" > leaks.json
-          
-          # Generate SARIF report
-          gitleaks detect --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
-          
-          # Set environment variable based on exit code
-          if [ $EXIT_CODE -eq 1 ]; then
-            echo "LEAKS_FOUND=true" >> $GITHUB_ENV
+          gitleaks detect -v --no-git --source . -c .gitleaks.toml -f json > leaks.json || true
+          gitleaks detect -v --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
+
+      - name: Check for Leaks
+        run: |
+          if [ -f leaks.json ]; then
             echo "Secrets detected in the repository!"
             cat leaks.json
-          else
-            echo "No leaks found"
-            echo "LEAKS_FOUND=false" >> $GITHUB_ENV
-            echo "[]" > leaks.json
+            exit 1
           fi
 
-      - name: Create Issue for Detected Secrets
-        if: env.LEAKS_FOUND == 'true'
+      - name: Create Issue on Failure
+        if: failure()
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GIT_ACTION_TOKEN }}
           script: |
             const fs = require('fs');
-            let leaksDetail = '[]';
+            let leaksDetail = '';
             
-            try {
-              const fileContent = fs.readFileSync('leaks.json', 'utf8');
-              if (fileContent.trim()) {
-                const leaks = JSON.parse(fileContent);
-                leaksDetail = JSON.stringify(leaks, null, 2);
-              }
-            } catch (error) {
-              console.log('Error reading or parsing leaks.json:', error);
+            if (fs.existsSync('leaks.json')) {
+              const leaks = JSON.parse(fs.readFileSync('leaks.json', 'utf8'));
+              leaksDetail = JSON.stringify(leaks, null, 2);
             }
 
             const issueBody = `## 🚨 Security Issue: Potential secrets detected
@@ -109,9 +92,3 @@ jobs:
             leaks.json
             results.sarif
           retention-days: 30
-
-      - name: Fail if leaks found
-        if: env.LEAKS_FOUND == 'true'
-        run: |
-          echo "Secrets were detected in the repository. Please check the created issue for details."
-          exit 1
