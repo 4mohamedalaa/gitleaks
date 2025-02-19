@@ -28,29 +28,41 @@ jobs:
       - name: Run Gitleaks
         id: gitleaks
         run: |
+          # Run gitleaks and capture the output
           gitleaks detect --no-git --source . -c .gitleaks.toml -f json > leaks.json || true
           gitleaks detect --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
-
-      - name: Check for Leaks
-        run: |
-          if [ -f leaks.json ]; then
+          
+          # Check if leaks.json has content and is valid JSON
+          if [ -s leaks.json ] && jq empty leaks.json 2>/dev/null; then
+            echo "LEAKS_FOUND=true" >> $GITHUB_ENV
             echo "Secrets detected in the repository!"
             cat leaks.json
             exit 1
+          else
+            echo "No leaks found or invalid JSON output"
+            echo "LEAKS_FOUND=false" >> $GITHUB_ENV
+            # Ensure we have a valid JSON array even if empty
+            echo "[]" > leaks.json
           fi
 
       - name: Create Issue on Failure
-        if: failure()
+        if: env.LEAKS_FOUND == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            let leaksDetail = '';
+            let leaksDetail = '[]';
             
-            if (fs.existsSync('leaks.json')) {
-              const leaks = JSON.parse(fs.readFileSync('leaks.json', 'utf8'));
-              leaksDetail = JSON.stringify(leaks, null, 2);
+            try {
+              if (fs.existsSync('leaks.json')) {
+                const fileContent = fs.readFileSync('leaks.json', 'utf8');
+                const leaks = JSON.parse(fileContent);
+                leaksDetail = JSON.stringify(leaks, null, 2);
+              }
+            } catch (error) {
+              console.log('Error reading or parsing leaks.json:', error);
+              leaksDetail = '[]';
             }
 
             const issueBody = `## 🚨 Security Issue: Potential secrets detected
