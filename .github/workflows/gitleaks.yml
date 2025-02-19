@@ -29,12 +29,16 @@ jobs:
         id: gitleaks
         continue-on-error: true
         run: |
-          OUTPUT=$(gitleaks detect -v --no-git --source . -c .gitleaks.toml -f json)
-          echo "GITLEAKS_OUTPUT<<EOF" >> $GITHUB_ENV
-          echo "$OUTPUT" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          if [ $? -eq 1 ]; then
+          # Run gitleaks and capture output
+          OUTPUT=$(gitleaks detect --no-git --source . -c .gitleaks.toml -f json || true)
+          
+          # Check if output contains findings
+          if echo "$OUTPUT" | grep -q "Description"; then
             echo "SECRETS_FOUND=true" >> $GITHUB_ENV
+            # Store the output for the issue creation
+            echo "GITLEAKS_OUTPUT<<EOF" >> $GITHUB_ENV
+            echo "$OUTPUT" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
           else
             echo "SECRETS_FOUND=false" >> $GITHUB_ENV
           fi
@@ -49,7 +53,12 @@ jobs:
             try {
               findings = JSON.parse(output);
             } catch (e) {
+              console.log('Error parsing JSON:', e);
               findings = [];
+            }
+            
+            if (!Array.isArray(findings)) {
+              findings = [findings];
             }
             
             const issueBody = `
@@ -59,10 +68,10 @@ jobs:
             
             ### Findings:
             ${findings.map(finding => `
-            - **Description**: ${finding.Description}
-            - **File**: ${finding.File}
-            - **Line**: ${finding.StartLine}
-            - **Rule**: ${finding.RuleID}
+            - **Description**: ${finding.Description || finding.description}
+            - **File**: ${finding.File || finding.file}
+            - **Line**: ${finding.StartLine || finding.start_line}
+            - **Rule**: ${finding.RuleID || finding.rule_id}
             `).join('\n')}
             
             ### 🔍 Next Steps:
