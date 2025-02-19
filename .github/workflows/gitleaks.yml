@@ -27,16 +27,20 @@ jobs:
 
       - name: Run Gitleaks
         id: gitleaks
+        continue-on-error: true
         run: |
-          # Run gitleaks and store exit code
-          gitleaks detect --no-git --source . -c .gitleaks.toml -f json > leaks.json
-          GITLEAKS_EXIT_CODE=$?
+          # Run gitleaks and capture both output and exit code
+          OUTPUT=$(gitleaks detect --no-git --source . -c .gitleaks.toml -f json)
+          EXIT_CODE=$?
           
-          # Also generate SARIF report
+          # Save the output to a file
+          echo "$OUTPUT" > leaks.json
+          
+          # Generate SARIF report
           gitleaks detect --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
           
-          # Check if leaks were found (exit code 1 means leaks were found)
-          if [ $GITLEAKS_EXIT_CODE -eq 1 ]; then
+          # Set environment variable based on exit code
+          if [ $EXIT_CODE -eq 1 ]; then
             echo "LEAKS_FOUND=true" >> $GITHUB_ENV
             echo "Secrets detected in the repository!"
             cat leaks.json
@@ -106,6 +110,8 @@ jobs:
             results.sarif
           retention-days: 30
 
-      - name: Exit if leaks found
+      - name: Fail if leaks found
         if: env.LEAKS_FOUND == 'true'
-        run: exit 1
+        run: |
+          echo "Secrets were detected in the repository. Please check the created issue for details."
+          exit 1
