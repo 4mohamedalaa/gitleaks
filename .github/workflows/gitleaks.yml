@@ -5,11 +5,10 @@ on: [push, pull_request]
 permissions:
   contents: read
   security-events: write
-  issues: write
 
 jobs:
-  security-scan:
-    name: Security Scanning
+  scan:
+    name: Scan for Secrets
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -17,49 +16,15 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Debug - List Files
-        run: |
-          echo "Current directory contents:"
-          ls -la
-          echo "Finding any README.md files:"
-          find . -name "README.md" || true
-          echo "Current directory:"
-          pwd
-
       - name: Install Gitleaks
         run: |
           wget https://github.com/zricethezav/gitleaks/releases/download/v8.16.1/gitleaks_8.16.1_linux_x64.tar.gz
           tar -xzf gitleaks_8.16.1_linux_x64.tar.gz
           sudo mv gitleaks /usr/local/bin/
       
-      - name: Run Current State Scan
-        id: gitleaks
+      - name: Scan Files
         run: |
-          # Print Gitleaks version
-          gitleaks version
-          
-          # Scan with verbose output
           gitleaks detect \
             --source . \
-            --verbose \
-            --debug \
             --no-git \
-            --report-format json \
-            --report-path leaks.json || echo "LEAKS_FOUND=true" >> $GITHUB_ENV
-
-      - name: Check for Leaks
-        run: |
-          echo "Files in current directory:"
-          ls -la
-          
-          if [ -f leaks.json ] && [ -s leaks.json ]; then
-            echo "Content of leaks.json:"
-            cat leaks.json
-            echo "Secrets detected in the current state of the repository!"
-            exit 1
-          else
-            echo "No secrets detected in current state - passing check"
-            exit 0
-          fi
-
-      # Rest of the workflow remains the same...
+            --verbose
