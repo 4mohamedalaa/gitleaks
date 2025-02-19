@@ -27,73 +27,69 @@ jobs:
 
       - name: Run Gitleaks
         id: gitleaks
-        continue-on-error: true
         run: |
-          # Run gitleaks and capture output
-          OUTPUT=$(gitleaks detect --no-git --source . -c .gitleaks.toml -f json || true)
-          
-          # Check if output contains findings
-          if echo "$OUTPUT" | grep -q "Description"; then
-            echo "SECRETS_FOUND=true" >> $GITHUB_ENV
-            # Store the output for the issue creation
-            echo "GITLEAKS_OUTPUT<<EOF" >> $GITHUB_ENV
-            echo "$OUTPUT" >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
-          else
-            echo "SECRETS_FOUND=false" >> $GITHUB_ENV
+          gitleaks detect --no-git --source . -c .gitleaks.toml -f json > leaks.json || true
+          gitleaks detect --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
+
+      - name: Check for Leaks
+        run: |
+          if [ -f leaks.json ]; then
+            echo "Secrets detected in the repository!"
+            cat leaks.json
+            exit 1
           fi
 
-      - name: Create Issue
-        if: env.SECRETS_FOUND == 'true'
+      - name: Create Issue on Failure
+        if: failure()
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const output = process.env.GITLEAKS_OUTPUT;
-            let findings;
-            try {
-              findings = JSON.parse(output);
-            } catch (e) {
-              console.log('Error parsing JSON:', e);
-              findings = [];
+            const fs = require('fs');
+            let leaksDetail = '';
+            
+            if (fs.existsSync('leaks.json')) {
+              const leaks = JSON.parse(fs.readFileSync('leaks.json', 'utf8'));
+              leaksDetail = JSON.stringify(leaks, null, 2);
             }
+
+            const issueBody = `## 🚨 Security Issue: Potential secrets detected
             
-            if (!Array.isArray(findings)) {
-              findings = [findings];
-            }
+            Gitleaks has detected secrets in the codebase.
             
-            const issueBody = `
-            ## 🚨 Secrets Detected in Repository
+            **Details:**
+            - Commit: ${context.sha}
+            - Branch: ${context.ref}
+            - Workflow run: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
             
-            GitLeaks has detected potential secrets in the codebase. Please review and remove any sensitive information.
+            ### Detected Secrets:
+            \`\`\`json
+            ${leaksDetail}
+            \`\`\`
             
-            ### Findings:
-            ${findings.map(finding => `
-            - **Description**: ${finding.Description || finding.description}
-            - **File**: ${finding.File || finding.file}
-            - **Line**: ${finding.StartLine || finding.start_line}
-            - **Rule**: ${finding.RuleID || finding.rule_id}
-            `).join('\n')}
+            ### Required Actions:
+            1. Remove ALL detected secrets from the codebase
+            2. Rotate any exposed credentials
+            3. Update affected systems
             
-            ### 🔍 Next Steps:
-            1. Review the detected secrets
-            2. Remove or rotate any exposed credentials
-            3. Use environment variables or secret management systems
-            4. Update the code to remove the secrets
+            ⛔ **PIPELINE BLOCKED**: This pipeline will continue to fail until all secrets are removed.
             
-            > Note: This is an automated security alert. Please handle with care.
-            `;
+            Please handle this with urgency.`;
             
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '🚨 Secrets Detected by GitLeaks',
+              title: '🚨 Security Issue: Secrets Found in Repository',
               body: issueBody,
-              labels: ['security', 'secrets-detected']
+              labels: ['security', 'gitleaks', 'pipeline-blocker']
             });
 
-      - name: Upload SARIF report
+      - name: Save Scan Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gitleaks-results
-          path: results.sarif
+          name: gitleaks-scan-results
+          path: |
+            leaks.json
+            results.sarif
+          retention-days: 30
