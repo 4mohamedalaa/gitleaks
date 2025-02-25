@@ -2,54 +2,113 @@ name: GitLeaks Secret Scanner
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, develop ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, develop ]
   schedule:
     - cron: '0 0 * * *'  # Run daily at midnight
-  workflow_dispatch:      # Allow manual triggers
+  workflow_dispatch:     # Allow manual triggers
 
 jobs:
   scan:
     name: GitLeaks Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      
+      - name: Cache Gitleaks binary
+        uses: actions/cache@v3
+        id: cache-gitleaks
+        with:
+          path: /usr/local/bin/gitleaks
+          key: ${{ runner.os }}-gitleaks-8.16.1
 
       - name: Install Gitleaks
+        if: steps.cache-gitleaks.outputs.cache-hit != 'true'
         run: |
           wget https://github.com/zricethezav/gitleaks/releases/download/v8.16.1/gitleaks_8.16.1_linux_x64.tar.gz
           tar -xzf gitleaks_8.16.1_linux_x64.tar.gz
           sudo mv gitleaks /usr/local/bin/
+      
+      - name: Setup custom configuration
+        run: |
+          if [ ! -f .gitleaks.toml ]; then
+            echo "No custom GitLeaks config found, using default configuration"
+            wget -q https://raw.githubusercontent.com/zricethezav/gitleaks/master/config/gitleaks.toml -O .gitleaks.toml
+          else
+            echo "Using custom GitLeaks configuration file"
+          fi
 
       - name: Run Gitleaks
+        id: gitleaks
         run: |
-          # Capture the output in text format
-          gitleaks detect -v --no-git --source . -c .gitleaks.toml > scan_output.txt || true
-          gitleaks detect -v --no-git --source . -c .gitleaks.toml -f sarif > results.sarif || true
-
-      - name: Check for Leaks
-        run: |
-          if grep -q "Finding:" scan_output.txt; then
+          # Run in history mode to scan all commits
+          gitleaks detect --source . -c .gitleaks.toml --report-format json --report-path gitleaks-report.json || true
+          gitleaks detect --source . -c .gitleaks.toml --report-format sarif --report-path results.sarif || true
+          
+          # Also create a text output for better readability
+          gitleaks detect -v --source . -c .gitleaks.toml > scan_output.txt || true
+          
+          # Check for findings
+          if [ -s gitleaks-report.json ] && [ "$(cat gitleaks-report.json)" != "[]" ]; then
+            echo "::set-output name=leaks_found::true"
             echo "Secrets detected in the repository!"
             cat scan_output.txt
             exit 1
+          else
+            echo "No secrets detected!"
           fi
 
+      - name: Upload SARIF results to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: results.sarif
+          category: gitleaks
+
       - name: Create Issue on Failure
-        if: failure()
+        if: failure() && steps.gitleaks.outputs.leaks_found == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GIT_ACTION_TOKEN }}
           script: |
             const fs = require('fs');
-            let findings = '';
             
+            let findings = '';
             if (fs.existsSync('scan_output.txt')) {
               findings = fs.readFileSync('scan_output.txt', 'utf8');
+            }
+            
+            let reportData = [];
+            if (fs.existsSync('gitleaks-report.json')) {
+              try {
+                reportData = JSON.parse(fs.readFileSync('gitleaks-report.json', 'utf8'));
+              } catch (e) {
+                console.error("Error parsing JSON report:", e);
+              }
+            }
+            
+            // Create a more structured summary of findings
+            let formattedFindings = '';
+            if (reportData.length > 0) {
+              formattedFindings = reportData.map((finding, index) => {
+                return `${index + 1}. **${finding.Description || 'Secret'}**:
+                   - File: \`${finding.File || 'N/A'}\`
+                   - Line: ${finding.StartLine || 'N/A'}
+                   - Commit: ${finding.Commit || context.sha.substring(0, 7)}
+                   - Author: ${finding.Author || 'N/A'}
+                   - Rule: ${finding.RuleID || 'N/A'}`;
+              }).join('\n\n');
+            } else {
+              formattedFindings = findings;
             }
 
             const issueBody = `## 🚨 Security Issue: Potential secrets detected
@@ -62,26 +121,40 @@ jobs:
             - Workflow run: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
             
             ### Detected Secrets:
-            \`\`\`
-            ${findings}
-            \`\`\`
+            
+            ${formattedFindings}
             
             ### Required Actions:
             1. Remove ALL detected secrets from the codebase
             2. Rotate any exposed credentials
             3. Update affected systems
+            4. Consider using [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) for storing secrets
+            5. Review [GitHub's secret scanning documentation](https://docs.github.com/en/code-security/secret-scanning/about-secret-scanning)
             
             ⛔ **PIPELINE BLOCKED**: This pipeline will continue to fail until all secrets are removed.
             
             Please handle this with urgency.`;
             
-            await github.rest.issues.create({
+            // Check if there's already an open issue for this
+            const openIssues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '🚨 Security Issue: Secrets Found in Repository',
-              body: issueBody,
-              labels: ['security', 'gitleaks', 'pipeline-blocker']
+              state: 'open',
+              labels: ['security', 'gitleaks']
             });
+            
+            if (openIssues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🚨 Security Issue: Secrets Found in Repository',
+                body: issueBody,
+                labels: ['security', 'gitleaks', 'pipeline-blocker']
+              });
+              console.log("Created new issue for GitLeaks findings");
+            } else {
+              console.log("An open GitLeaks issue already exists, not creating a duplicate");
+            }
 
       - name: Save Scan Results
         if: always()
@@ -91,4 +164,10 @@ jobs:
           path: |
             scan_output.txt
             results.sarif
+            gitleaks-report.json
           retention-days: 30
+          
+      - name: Notify on Success
+        if: success()
+        run: |
+          echo "✅ GitLeaks scan completed successfully with no secrets detected!"
