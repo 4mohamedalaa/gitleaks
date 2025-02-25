@@ -52,24 +52,77 @@ jobs:
         run: |
           # Run in history mode to scan all commits
           gitleaks detect --source . -c .gitleaks.toml --report-format json --report-path gitleaks-report.json || true
-          gitleaks detect --source . -c .gitleaks.toml --report-format sarif --report-path results.sarif || true
+          
+          # Check for baseline file and use it if it exists
+          if [ -f .gitleaks-baseline.json ]; then
+            echo "Using baseline file to filter out known/accepted secrets"
+            gitleaks detect --source . -c .gitleaks.toml --baseline-path .gitleaks-baseline.json --report-format sarif --report-path results.sarif || true
+          else
+            gitleaks detect --source . -c .gitleaks.toml --report-format sarif --report-path results.sarif || true
+          fi
           
           # Also create a text output for better readability
           gitleaks detect -v --source . -c .gitleaks.toml > scan_output.txt || true
           
           # Check for findings
           if [ -s gitleaks-report.json ] && [ "$(cat gitleaks-report.json)" != "[]" ]; then
-            echo "::set-output name=leaks_found::true"
             echo "Secrets detected in the repository!"
             cat scan_output.txt
+            echo "::set-output name=leaks_found::true"
             exit 1
           else
             echo "No secrets detected!"
           fi
 
+      - name: Generate Remediation Report
+        if: failure() && steps.gitleaks.outputs.leaks_found == 'true'
+        run: |
+          cat << EOF > remediation_report.md
+          # Secret Remediation Report
+
+          ## Detection Summary
+          - Total secrets found: $(cat gitleaks-report.json | jq '. | length')
+          - Scan date: $(date)
+          - Repository: ${{ github.repository }}
+
+          ## Detected Secret Types
+          $(cat gitleaks-report.json | jq -r '.[].RuleID' | sort | uniq -c | sort -nr | awk '{print "- " $2 ": " $1 " occurrences"}')
+
+          ## Affected Files
+          $(cat gitleaks-report.json | jq -r '.[] | .File' | sort | uniq -c | sort -nr | awk '{print "- " $2 ": " $1 " secrets"}')
+
+          ## Remediation Steps
+
+          1. **Remove the secrets from your codebase**:
+             - Delete or replace the leaked credentials in the affected files
+             - Commit and push these changes
+
+          2. **Purge secrets from git history**:
+             ```bash
+             # Using BFG Repo-Cleaner (recommended)
+             java -jar bfg.jar --replace-text passwords.txt
+
+             # Alternative: git filter-branch
+             git filter-branch --force --index-filter "git rm --cached --ignore-unmatch PATH_TO_FILE" --prune-empty --tag-name-filter cat -- --all
+             ```
+
+          3. **Rotate the compromised credentials**:
+             - Change all exposed passwords
+             - Revoke and regenerate API keys
+             - Rotate all access tokens
+
+          4. **Prevent future leaks**:
+             - Add sensitive files to .gitignore
+             - Use environment variables instead of hardcoded secrets
+             - Consider using a secrets management solution
+             - Setup pre-commit hooks with gitleaks
+
+          For more detailed instructions, please see the [Secret Remediation Plan](https://github.com/${{ github.repository }}/issues?q=is%3Aissue+is%3Aopen+gitleaks).
+          EOF
+
       - name: Upload SARIF results to GitHub Security
         if: always()
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
           category: gitleaks
@@ -84,7 +137,9 @@ jobs:
             
             let findings = '';
             if (fs.existsSync('scan_output.txt')) {
-              findings = fs.readFileSync('scan_output.txt', 'utf8');
+              findings = fs.readFileSync('scan_output.txt', 'utf8').substring(0, 2000) + 
+                         (fs.readFileSync('scan_output.txt', 'utf8').length > 2000 ? 
+                          '\n\n... output truncated, see workflow artifacts for complete results ...' : '');
             }
             
             let reportData = [];
@@ -96,40 +151,91 @@ jobs:
               }
             }
             
-            // Create a more structured summary of findings
-            let formattedFindings = '';
+            // Create a structured summary of findings by type
+            let secretsByType = {};
             if (reportData.length > 0) {
-              formattedFindings = reportData.map((finding, index) => {
-                return `${index + 1}. **${finding.Description || 'Secret'}**:
-                   - File: \`${finding.File || 'N/A'}\`
-                   - Line: ${finding.StartLine || 'N/A'}
-                   - Commit: ${finding.Commit || context.sha.substring(0, 7)}
-                   - Author: ${finding.Author || 'N/A'}
-                   - Rule: ${finding.RuleID || 'N/A'}`;
-              }).join('\n\n');
-            } else {
-              formattedFindings = findings;
+              reportData.forEach(finding => {
+                if (!secretsByType[finding.RuleID]) {
+                  secretsByType[finding.RuleID] = [];
+                }
+                secretsByType[finding.RuleID].push({
+                  file: finding.File,
+                  line: finding.StartLine,
+                  commit: finding.Commit ? finding.Commit.substring(0, 7) : 'N/A'
+                });
+              });
+            }
+            
+            let typesSummary = '';
+            for (const [type, secrets] of Object.entries(secretsByType)) {
+              typesSummary += `### ${type} (${secrets.length} instances)\n`;
+              typesSummary += `| File | Line | Commit |\n|------|------|--------|\n`;
+              // Show only first 5 instances per type to keep the issue manageable
+              const displayCount = Math.min(secrets.length, 5);
+              for (let i = 0; i < displayCount; i++) {
+                typesSummary += `| \`${secrets[i].file}\` | ${secrets[i].line} | ${secrets[i].commit} |\n`;
+              }
+              if (secrets.length > 5) {
+                typesSummary += `| ... and ${secrets.length - 5} more instances | | |\n`;
+              }
+              typesSummary += '\n';
+            }
+            
+            // Read the generated remediation report if it exists
+            let remediationSteps = '';
+            if (fs.existsSync('remediation_report.md')) {
+              remediationSteps = fs.readFileSync('remediation_report.md', 'utf8');
             }
 
             const issueBody = `## 🚨 Security Issue: Potential secrets detected
             
-            Gitleaks has detected secrets in the codebase.
+            Gitleaks has detected **${reportData.length} secrets** in the codebase.
             
             **Details:**
             - Commit: ${context.sha}
             - Branch: ${context.ref}
             - Workflow run: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
             
-            ### Detected Secrets:
+            ## Summary of Detected Secrets by Type
             
-            ${formattedFindings}
+            ${typesSummary}
             
-            ### Required Actions:
-            1. Remove ALL detected secrets from the codebase
-            2. Rotate any exposed credentials
-            3. Update affected systems
-            4. Consider using [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) for storing secrets
-            5. Review [GitHub's secret scanning documentation](https://docs.github.com/en/code-security/secret-scanning/about-secret-scanning)
+            ## Remediation Steps
+            
+            1. **ROTATE ALL EXPOSED CREDENTIALS IMMEDIATELY**
+            2. Remove the secrets from the code
+            3. Clean git history to remove secrets (see detailed steps below)
+            4. Implement proper secret management using environment variables or a secrets vault
+            
+            ## Detailed Remediation Guide
+            
+            1. **Remove secrets from current codebase**
+               - Replace hardcoded credentials with environment variables
+               - Update all affected files
+            
+            2. **Purge secrets from git history**
+               - Use BFG Repo-Cleaner (preferred):
+                 ```
+                 java -jar bfg.jar --replace-text passwords.txt --no-blob-protection
+                 git reflog expire --expire=now --all
+                 git gc --prune=now --aggressive
+                 git push --force
+                 ```
+               
+               - Or use git filter-branch:
+                 ```
+                 git filter-branch --force --index-filter "git rm --cached --ignore-unmatch PATH_TO_FILE" --prune-empty --tag-name-filter cat -- --all
+                 ```
+            
+            3. **Rotate compromised credentials**
+               - Change all exposed passwords and secrets
+               - Revoke and regenerate all API keys, tokens, and certificates
+            
+            4. **Prevent future leaks**
+               - Setup a pre-commit hook with GitLeaks
+               - Add sensitive patterns to .gitignore
+               - Create a .gitleaks.toml configuration file
+               - Use a secrets management solution
             
             ⛔ **PIPELINE BLOCKED**: This pipeline will continue to fail until all secrets are removed.
             
@@ -149,11 +255,18 @@ jobs:
                 repo: context.repo.repo,
                 title: '🚨 Security Issue: Secrets Found in Repository',
                 body: issueBody,
-                labels: ['security', 'gitleaks', 'pipeline-blocker']
+                labels: ['security', 'gitleaks', 'pipeline-blocker', 'priority-high']
               });
               console.log("Created new issue for GitLeaks findings");
             } else {
-              console.log("An open GitLeaks issue already exists, not creating a duplicate");
+              // Update the existing issue with new information
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: openIssues.data[0].number,
+                body: `${issueBody}\n\n> *This issue was updated on ${new Date().toISOString()} with the latest scan results.*`
+              });
+              console.log("Updated existing GitLeaks issue with new scan results");
             }
 
       - name: Save Scan Results
@@ -165,6 +278,7 @@ jobs:
             scan_output.txt
             results.sarif
             gitleaks-report.json
+            remediation_report.md
           retention-days: 30
           
       - name: Notify on Success
