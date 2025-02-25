@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
       issues: write
 
     steps:
@@ -24,108 +23,27 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Cache Gitleaks binary
-        uses: actions/cache@v3
-        id: cache-gitleaks
-        with:
-          path: /usr/local/bin/gitleaks
-          key: ${{ runner.os }}-gitleaks-8.16.1
-
       - name: Install Gitleaks
-        if: steps.cache-gitleaks.outputs.cache-hit != 'true'
         run: |
           wget https://github.com/zricethezav/gitleaks/releases/download/v8.16.1/gitleaks_8.16.1_linux_x64.tar.gz
           tar -xzf gitleaks_8.16.1_linux_x64.tar.gz
           sudo mv gitleaks /usr/local/bin/
-      
-      - name: Setup custom configuration
-        run: |
-          if [ ! -f .gitleaks.toml ]; then
-            echo "No custom GitLeaks config found, using default configuration"
-            wget -q https://raw.githubusercontent.com/zricethezav/gitleaks/master/config/gitleaks.toml -O .gitleaks.toml
-          else
-            echo "Using custom GitLeaks configuration file"
-          fi
 
       - name: Run Gitleaks
         id: gitleaks
         run: |
-          # Run in history mode to scan all commits
-          gitleaks detect --source . -c .gitleaks.toml --report-format json --report-path gitleaks-report.json || true
+          # Run gitleaks and output to text file
+          gitleaks detect -v --source . > scan_output.txt || true
           
-          # Check for baseline file and use it if it exists
-          if [ -f .gitleaks-baseline.json ]; then
-            echo "Using baseline file to filter out known/accepted secrets"
-            gitleaks detect --source . -c .gitleaks.toml --baseline-path .gitleaks-baseline.json --report-format sarif --report-path results.sarif || true
-          else
-            gitleaks detect --source . -c .gitleaks.toml --report-format sarif --report-path results.sarif || true
-          fi
-          
-          # Also create a text output for better readability
-          gitleaks detect -v --source . -c .gitleaks.toml > scan_output.txt || true
-          
-          # Check for findings
-          if [ -s gitleaks-report.json ] && [ "$(cat gitleaks-report.json)" != "[]" ]; then
+          # Check if leaks were found
+          if grep -q "Finding:" scan_output.txt; then
+            echo "::set-output name=leaks_found::true"
             echo "Secrets detected in the repository!"
             cat scan_output.txt
-            echo "::set-output name=leaks_found::true"
             exit 1
           else
             echo "No secrets detected!"
           fi
-
-      - name: Generate Remediation Report
-        if: failure() && steps.gitleaks.outputs.leaks_found == 'true'
-        run: |
-          cat << EOF > remediation_report.md
-          # Secret Remediation Report
-
-          ## Detection Summary
-          - Total secrets found: $(cat gitleaks-report.json | jq '. | length')
-          - Scan date: $(date)
-          - Repository: ${{ github.repository }}
-
-          ## Detected Secret Types
-          $(cat gitleaks-report.json | jq -r '.[].RuleID' | sort | uniq -c | sort -nr | awk '{print "- " $2 ": " $1 " occurrences"}')
-
-          ## Affected Files
-          $(cat gitleaks-report.json | jq -r '.[] | .File' | sort | uniq -c | sort -nr | awk '{print "- " $2 ": " $1 " secrets"}')
-
-          ## Remediation Steps
-
-          1. **Remove the secrets from your codebase**:
-             - Delete or replace the leaked credentials in the affected files
-             - Commit and push these changes
-
-          2. **Purge secrets from git history**:
-             ```bash
-             # Using BFG Repo-Cleaner (recommended)
-             java -jar bfg.jar --replace-text passwords.txt
-
-             # Alternative: git filter-branch
-             git filter-branch --force --index-filter "git rm --cached --ignore-unmatch PATH_TO_FILE" --prune-empty --tag-name-filter cat -- --all
-             ```
-
-          3. **Rotate the compromised credentials**:
-             - Change all exposed passwords
-             - Revoke and regenerate API keys
-             - Rotate all access tokens
-
-          4. **Prevent future leaks**:
-             - Add sensitive files to .gitignore
-             - Use environment variables instead of hardcoded secrets
-             - Consider using a secrets management solution
-             - Setup pre-commit hooks with gitleaks
-
-          For more detailed instructions, please see the [Secret Remediation Plan](https://github.com/${{ github.repository }}/issues?q=is%3Aissue+is%3Aopen+gitleaks).
-          EOF
-
-      - name: Upload SARIF results to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
-          category: gitleaks
 
       - name: Create Issue on Failure
         if: failure() && steps.gitleaks.outputs.leaks_found == 'true'
@@ -142,104 +60,43 @@ jobs:
                           '\n\n... output truncated, see workflow artifacts for complete results ...' : '');
             }
             
-            let reportData = [];
-            if (fs.existsSync('gitleaks-report.json')) {
-              try {
-                reportData = JSON.parse(fs.readFileSync('gitleaks-report.json', 'utf8'));
-              } catch (e) {
-                console.error("Error parsing JSON report:", e);
-              }
-            }
+            const issueBody = `## 🚨 Security Issue: Secrets detected in repository
             
-            // Create a structured summary of findings by type
-            let secretsByType = {};
-            if (reportData.length > 0) {
-              reportData.forEach(finding => {
-                if (!secretsByType[finding.RuleID]) {
-                  secretsByType[finding.RuleID] = [];
-                }
-                secretsByType[finding.RuleID].push({
-                  file: finding.File,
-                  line: finding.StartLine,
-                  commit: finding.Commit ? finding.Commit.substring(0, 7) : 'N/A'
-                });
-              });
-            }
-            
-            let typesSummary = '';
-            for (const [type, secrets] of Object.entries(secretsByType)) {
-              typesSummary += `### ${type} (${secrets.length} instances)\n`;
-              typesSummary += `| File | Line | Commit |\n|------|------|--------|\n`;
-              // Show only first 5 instances per type to keep the issue manageable
-              const displayCount = Math.min(secrets.length, 5);
-              for (let i = 0; i < displayCount; i++) {
-                typesSummary += `| \`${secrets[i].file}\` | ${secrets[i].line} | ${secrets[i].commit} |\n`;
-              }
-              if (secrets.length > 5) {
-                typesSummary += `| ... and ${secrets.length - 5} more instances | | |\n`;
-              }
-              typesSummary += '\n';
-            }
-            
-            // Read the generated remediation report if it exists
-            let remediationSteps = '';
-            if (fs.existsSync('remediation_report.md')) {
-              remediationSteps = fs.readFileSync('remediation_report.md', 'utf8');
-            }
-
-            const issueBody = `## 🚨 Security Issue: Potential secrets detected
-            
-            Gitleaks has detected **${reportData.length} secrets** in the codebase.
+            GitLeaks has detected secrets in the codebase that need to be addressed immediately.
             
             **Details:**
             - Commit: ${context.sha}
             - Branch: ${context.ref}
-            - Workflow run: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+            - Workflow: ${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
             
-            ## Summary of Detected Secrets by Type
+            ### Detected Secrets (partial list):
+            \`\`\`
+            ${findings}
+            \`\`\`
             
-            ${typesSummary}
+            ### Required Actions:
             
-            ## Remediation Steps
-            
-            1. **ROTATE ALL EXPOSED CREDENTIALS IMMEDIATELY**
-            2. Remove the secrets from the code
-            3. Clean git history to remove secrets (see detailed steps below)
-            4. Implement proper secret management using environment variables or a secrets vault
-            
-            ## Detailed Remediation Guide
-            
-            1. **Remove secrets from current codebase**
+            1. **Remove the secrets from your code**
                - Replace hardcoded credentials with environment variables
-               - Update all affected files
-            
-            2. **Purge secrets from git history**
-               - Use BFG Repo-Cleaner (preferred):
-                 ```
-                 java -jar bfg.jar --replace-text passwords.txt --no-blob-protection
-                 git reflog expire --expire=now --all
-                 git gc --prune=now --aggressive
-                 git push --force
-                 ```
+               - Ensure all files with secrets are removed
+
+            2. **Remove secrets from git history**
+               \`\`\`bash
+               # For specific files (like secrets.txt):
+               git filter-branch --force --index-filter "git rm --cached --ignore-unmatch secrets.txt" --prune-empty --tag-name-filter cat -- --all
+               git push origin --force --all
+               \`\`\`
                
-               - Or use git filter-branch:
-                 ```
-                 git filter-branch --force --index-filter "git rm --cached --ignore-unmatch PATH_TO_FILE" --prune-empty --tag-name-filter cat -- --all
-                 ```
+            3. **Rotate all compromised credentials**
+               - Change all passwords that were exposed
+               - Revoke and regenerate all API keys and tokens
+               
+            4. **Implement proper secret management**
+               - Use GitHub Secrets for workflow credentials
+               - Use environment variables in your applications
+               - Consider using a secret management tool
             
-            3. **Rotate compromised credentials**
-               - Change all exposed passwords and secrets
-               - Revoke and regenerate all API keys, tokens, and certificates
-            
-            4. **Prevent future leaks**
-               - Setup a pre-commit hook with GitLeaks
-               - Add sensitive patterns to .gitignore
-               - Create a .gitleaks.toml configuration file
-               - Use a secrets management solution
-            
-            ⛔ **PIPELINE BLOCKED**: This pipeline will continue to fail until all secrets are removed.
-            
-            Please handle this with urgency.`;
+            Please address this issue immediately to prevent unauthorized access to your systems.`;
             
             // Check if there's already an open issue for this
             const openIssues = await github.rest.issues.listForRepo({
@@ -255,18 +112,10 @@ jobs:
                 repo: context.repo.repo,
                 title: '🚨 Security Issue: Secrets Found in Repository',
                 body: issueBody,
-                labels: ['security', 'gitleaks', 'pipeline-blocker', 'priority-high']
+                labels: ['security', 'gitleaks']
               });
-              console.log("Created new issue for GitLeaks findings");
             } else {
-              // Update the existing issue with new information
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: openIssues.data[0].number,
-                body: `${issueBody}\n\n> *This issue was updated on ${new Date().toISOString()} with the latest scan results.*`
-              });
-              console.log("Updated existing GitLeaks issue with new scan results");
+              console.log("An open GitLeaks issue already exists, not creating a duplicate");
             }
 
       - name: Save Scan Results
@@ -274,11 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-scan-results
-          path: |
-            scan_output.txt
-            results.sarif
-            gitleaks-report.json
-            remediation_report.md
+          path: scan_output.txt
           retention-days: 30
           
       - name: Notify on Success
