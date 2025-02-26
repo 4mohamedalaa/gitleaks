@@ -130,3 +130,5 @@ jobs:
         if: success()
         run: |
           echo "✅ GitLeaks scan completed successfully with no secrets detected!"
+
+          
