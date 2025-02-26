@@ -8,7 +8,7 @@ paths = [
     '''yarn.lock''',
     '''__snapshots__''',
     '''README.md''',
-    '''\.md$''',
+    '''\.md$'''
 ]
 
 description = "allowlisted files and patterns"
@@ -19,13 +19,14 @@ regexes = [
     '''postgres:\/\/user:password@example\.com''',
     '''postgres:\/\/\*\*localhost''',
     '''mongodb:\/\/\*\*localhost''',
-    '''mongodb:\/\/\*\*mongodb0\.example\.com''',
+    '''mongodb:\/\/\*\*mongodb0\.example\.com'''
 ]
 
 [[rules]]
 id = "aws-credentials"
 description = "AWS Credentials"
 regex = '''(?i)(aws_access_key|aws_secret_key)\s*=\s*["'][^"']{8,}["']'''
+
 [rules.allowlist]
 regexes = ['''["']AKIA[A-Z0-9]{0,16}EXAMPLE["']''']
 
@@ -33,6 +34,7 @@ regexes = ['''["']AKIA[A-Z0-9]{0,16}EXAMPLE["']''']
 id = "postgres-url"
 description = "Postgres Connection URL"
 regex = '''(?i)(postgres(?:ql)?:\/\/[^:\s]+:[^@\s]+@[^\s]+)'''
+
 [rules.allowlist]
 regexes = ['''localhost''', '''example\.com''', '''127\.0\.0\.1''']
 
@@ -40,6 +42,7 @@ regexes = ['''localhost''', '''example\.com''', '''127\.0\.0\.1''']
 id = "mongodb-url"
 description = "MongoDB Connection URL"
 regex = '''(?i)(mongodb:\/\/[^:\s]+:[^@\s]+@[^\s]+)'''
+
 [rules.allowlist]
 regexes = ['''localhost''', '''example\.com''', '''127\.0\.0\.1''']
 
@@ -47,6 +50,7 @@ regexes = ['''localhost''', '''example\.com''', '''127\.0\.0\.1''']
 id = "github-token"
 description = "GitHub Token"
 regex = '''(?i)ghp_[0-9a-zA-Z]{36}'''
+
 [rules.allowlist]
 regexes = ['''ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx''']
 
@@ -54,6 +58,7 @@ regexes = ['''ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx''']
 id = "google-api"
 description = "Google API Key"
 regex = '''(?i)AIza[0-9A-Za-z\\-_]{35}'''
+
 [rules.allowlist]
 regexes = ['''AIzaSyBxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx''']
 
@@ -61,12 +66,14 @@ regexes = ['''AIzaSyBxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx''']
 id = "jwt"
 description = "JWT Token"
 regex = '''(?i)eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*'''
+
 [rules.allowlist]
-regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.'''']
+regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.''']
 
 [[rules]]
 id = "private-key"
 description = "Private Key"
 regex = '''(?s)-----BEGIN.*?PRIVATE KEY-----.*?-----END.*?PRIVATE KEY-----'''
+
 [rules.allowlist]
 regexes = ['''-----BEGIN RSA PRIVATE KEY-----\s+MIIEogIBAAKCAQEA7bq98D12ptBNZwvNUs\+kfmL2kCvP0RH\+RyHF0I[0-9]=\s+-----END RS''']
