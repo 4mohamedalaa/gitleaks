@@ -13,30 +13,25 @@ paths = [
 
 description = "allowlisted files and patterns"
 regexes = [
-    '''example\.com''',
     '''localhost''',
-    '''127\.0\.0\.1''',
-    '''postgres:\/\/user:password@example\.com''',
-    '''postgres:\/\/\*\*localhost''',
-    '''mongodb:\/\/\*\*localhost''',
-    '''mongodb:\/\/\*\*mongodb0\.example\.com'''
+    '''127\.0\.0\.1'''
 ]
+
+# General rules
 
 [[rules]]
 id = "aws-credentials"
 description = "AWS Credentials"
 regex = '''(?i)(aws_access_key|aws_secret_key)\s*=\s*["'][^"']{8,}["']'''
 
-[rules.allowlist]
-regexes = ['''["']AKIA[A-Z0-9]{0,16}EXAMPLE["']''']
+# Removed allowlist for AWS credentials to catch example keys
 
 [[rules]]
 id = "postgres-url"
 description = "Postgres Connection URL"
 regex = '''(?i)(postgres(?:ql)?:\/\/[^:\s]+:[^@\s]+@[^\s]+)'''
 
-[rules.allowlist]
-regexes = ['''localhost''', '''example\.com''', '''127\.0\.0\.1''']
+# Removed example.com from allowlist to catch example.com database URLs
 
 [[rules]]
 id = "mongodb-url"
@@ -44,7 +39,7 @@ description = "MongoDB Connection URL"
 regex = '''(?i)(mongodb:\/\/[^:\s]+:[^@\s]+@[^\s]+)'''
 
 [rules.allowlist]
-regexes = ['''localhost''', '''example\.com''', '''127\.0\.0\.1''']
+regexes = ['''localhost''', '''127\.0\.0\.1''']
 
 [[rules]]
 id = "github-token"
@@ -77,3 +72,20 @@ regex = '''(?s)-----BEGIN.*?PRIVATE KEY-----.*?-----END.*?PRIVATE KEY-----'''
 
 [rules.allowlist]
 regexes = ['''-----BEGIN RSA PRIVATE KEY-----\s+MIIEogIBAAKCAQEA7bq98D12ptBNZwvNUs\+kfmL2kCvP0RH\+RyHF0I[0-9]=\s+-----END RS''']
+
+# Additional rules to catch specific example credentials
+
+[[rules]]
+id = "aws-example-key"
+description = "AWS Example Access Key"
+regex = '''AKIAIOSFODNN7EXAMPLE'''
+
+[[rules]]
+id = "aws-example-secret"
+description = "AWS Example Secret Key"
+regex = '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'''
+
+[[rules]]
+id = "db-example-credentials"
+description = "Database Example Credentials" 
+regex = '''admin:secretpassword@db\.example\.com'''
