@@ -84,8 +84,3 @@ regex = '''AKIAIOSFODNN7EXAMPLE'''
 id = "aws-example-secret"
 description = "AWS Example Secret Key"
 regex = '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'''
-
-[[rules]]
-id = "db-example-credentials"
-description = "Database Example Credentials" 
-regex = '''admin:secretpassword@db\.example\.com'''
